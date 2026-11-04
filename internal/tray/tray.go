@@ -112,6 +112,7 @@ func onReady(opts Options) func() {
 					recheck()
 				case <-mRefresh.ClickedCh:
 					opts.Poll.Refresh()
+					reopenMenu()
 				case <-mAckAll.ClickedCh:
 					allPRs := append(opts.Poll.MyPRs(), opts.Poll.ReviewRequests()...)
 					opts.Acknowledge.AcknowledgeAll(allPRs)
