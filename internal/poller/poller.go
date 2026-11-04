@@ -15,7 +15,7 @@ import (
 // Manager runs a per-server poll loop and notifies callers of PR state changes.
 type Manager struct {
 	authMgr *auth.Manager
-	cfg     *config.AppConfig
+	cfg     *config.Store
 	store   *stateStore
 
 	onChange func([]Change)
@@ -29,7 +29,7 @@ type Manager struct {
 }
 
 // NewManager creates a Manager. Call Start() to begin polling.
-func NewManager(authMgr *auth.Manager, cfg *config.AppConfig) *Manager {
+func NewManager(authMgr *auth.Manager, cfg *config.Store) *Manager {
 	ctx, cancel := context.WithCancel(context.Background())
 	return &Manager{
 		authMgr:  authMgr,
@@ -127,13 +127,14 @@ func (m *Manager) startServer(host string) {
 func (m *Manager) runServerLoop(ctx context.Context, host string, refresh <-chan struct{}) {
 	defer m.wg.Done()
 
-	interval := m.pollInterval()
-	slog.Debug("poll loop started", "host", host, "interval", interval)
+	slog.Debug("poll loop started", "host", host, "interval", m.pollInterval())
 
 	// Poll immediately on start.
 	m.pollServer(ctx, host)
 
 	for {
+		// Re-read each cycle so a reloaded poll_interval takes effect.
+		interval := m.pollInterval()
 		select {
 		case <-ctx.Done():
 			slog.Debug("poll loop stopped", "host", host)
@@ -158,7 +159,7 @@ func (m *Manager) pollServer(ctx context.Context, host string) {
 	defer cancel()
 
 	slog.Debug("polling server", "host", host)
-	client := github.NewClient(host, token, m.cfg.ExcludeAuthors)
+	client := github.NewClient(host, token, m.cfg.Get().ExcludeAuthors)
 
 	since := m.prAgeCutoff()
 
@@ -180,7 +181,7 @@ func (m *Manager) pollServer(ctx context.Context, host string) {
 }
 
 func (m *Manager) pollInterval() time.Duration {
-	d, err := time.ParseDuration(m.cfg.PollInterval)
+	d, err := time.ParseDuration(m.cfg.Get().PollInterval)
 	if err != nil || d < 10*time.Second {
 		return 300 * time.Second
 	}
@@ -198,7 +199,7 @@ func jitter(d time.Duration) time.Duration {
 // prAgeCutoff returns the earliest UpdatedAt time a PR must have to be shown.
 // Returns zero time if no max age is configured.
 func (m *Manager) prAgeCutoff() time.Time {
-	age := m.cfg.ParseMaxPRAge()
+	age := m.cfg.Get().ParseMaxPRAge()
 	if age <= 0 {
 		return time.Time{}
 	}

@@ -27,14 +27,14 @@ type prList struct {
 	mgr         *auth.Manager
 	snooze      *poller.SnoozeStore
 	acknowledge *poller.AcknowledgeStore
-	notifyCfg   *config.NotificationConfig
+	cfg         *config.Store
 	prevSnoozed map[string]bool
 	getPRs      getPRsFunc
 }
 
 type getPRsFunc func() []github.PR
 
-func newPRList(maxItems int, mgr *auth.Manager, snooze *poller.SnoozeStore, ack *poller.AcknowledgeStore, notifyCfg *config.NotificationConfig, label string, showApprove bool, getPRs getPRsFunc) *prList {
+func newPRList(maxItems int, mgr *auth.Manager, snooze *poller.SnoozeStore, ack *poller.AcknowledgeStore, cfg *config.Store, label string, showApprove bool, getPRs getPRsFunc) *prList {
 	return &prList{
 		maxItems:    maxItems,
 		label:       label,
@@ -42,7 +42,7 @@ func newPRList(maxItems int, mgr *auth.Manager, snooze *poller.SnoozeStore, ack 
 		mgr:         mgr,
 		snooze:      snooze,
 		acknowledge: ack,
-		notifyCfg:   notifyCfg,
+		cfg:         cfg,
 		prevSnoozed: make(map[string]bool),
 		getPRs:      getPRs,
 	}
@@ -136,7 +136,7 @@ func (l *prList) update() (visible, active int) {
 
 	// Active count excludes acknowledged PRs.
 	for _, pr := range visiblePRs {
-		if !l.acknowledge.IsAcknowledged(pr, l.notifyCfg) {
+		if !l.acknowledge.IsAcknowledged(pr, &l.cfg.Get().Notifications) {
 			active++
 		}
 	}

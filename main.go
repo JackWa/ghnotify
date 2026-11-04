@@ -102,10 +102,10 @@ func runPRDetail(ctx context.Context, cmd *cli.Command) error {
 }
 
 func run(ctx context.Context, cmd *cli.Command) error {
-	cfg, err := config.Load()
-	if err != nil {
-		return fmt.Errorf("load config: %w", err)
-	}
+	// A bad config file no longer stops the app: Load falls back to the
+	// defaults and the tray reports the error until the file is fixed.
+	cfg, cfgErr := config.Load()
+	cfgStore := config.NewStore(cfg)
 
 	snoozePath, err := config.SnoozeFilePath()
 	if err != nil {
@@ -120,19 +120,20 @@ func run(ctx context.Context, cmd *cli.Command) error {
 	mgr := auth.NewManager()
 	snooze := poller.NewSnoozeStore(snoozePath)
 	ack := poller.NewAcknowledgeStore(ackPath)
-	poll := poller.NewManager(mgr, cfg)
+	poll := poller.NewManager(mgr, cfgStore)
 	poll.Start()
 	defer poll.Stop()
 
 	// Run the tray. This will block until the user quits.
 	slog.Debug("starting tray")
 	tray.Run(tray.Options{
-		Config:      cfg,
+		Config:      cfgStore,
+		ConfigErr:   cfgErr,
 		Auth:        mgr,
 		Poll:        poll,
 		Snooze:      snooze,
 		Acknowledge: ack,
-		Notif:       notify.NewNotifier(&cfg.Notifications, snooze),
+		Notif:       notify.NewNotifier(cfgStore, snooze),
 		Updater:     updater.NewUpdater(version),
 	})
 	return nil

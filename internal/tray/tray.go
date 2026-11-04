@@ -18,7 +18,8 @@ import (
 
 // Options bundles all dependencies for the tray.
 type Options struct {
-	Config      *config.AppConfig
+	Config      *config.Store
+	ConfigErr   error // non-nil if config.toml could not be loaded at startup
 	Auth        *auth.Manager
 	Poll        *poller.Manager
 	Snooze      *poller.SnoozeStore
@@ -32,14 +33,6 @@ func Run(opts Options) {
 	systray.Run(onReady(opts), onExit)
 }
 
-func setIcon(active bool) {
-	if active {
-		systray.SetIcon(iconActiveBytes())
-	} else {
-		systray.SetIcon(iconBytes())
-	}
-}
-
 func newSectionHeader(label string) *systray.MenuItem {
 	systray.AddSeparator()
 	m := systray.AddMenuItem(label, "")
@@ -51,18 +44,21 @@ func onReady(opts Options) func() {
 	return func() {
 		slog.Debug("setting up tray menu")
 
-		setIcon(false)
+		status := &appStatus{}
+		status.render()
 		systray.SetTooltip("ghnotify — GitHub PR monitor")
 
 		// My PRs section — all slots created BEFORE the separator.
-		myList := newPRList(opts.Config.MaxPRsPerSection, opts.Auth, opts.Snooze, opts.Acknowledge, &opts.Config.Notifications, "My Pull Requests", false, opts.Poll.MyPRs)
+		// Menu slots are created once, so max_prs_per_section needs a restart.
+		maxPRs := opts.Config.Get().MaxPRsPerSection
+		myList := newPRList(maxPRs, opts.Auth, opts.Snooze, opts.Acknowledge, opts.Config, "My Pull Requests", false, opts.Poll.MyPRs)
 		myList.build()
 
 		systray.AddSeparator()
 
 		// Review Requests section — all slots created BEFORE the separator.
 		enableApprovePR := false
-		reviewList := newPRList(opts.Config.MaxPRsPerSection, opts.Auth, opts.Snooze, opts.Acknowledge, &opts.Config.Notifications, "Review Requests", enableApprovePR, opts.Poll.ReviewRequests)
+		reviewList := newPRList(maxPRs, opts.Auth, opts.Snooze, opts.Acknowledge, opts.Config, "Review Requests", enableApprovePR, opts.Poll.ReviewRequests)
 		reviewList.build()
 
 		newSectionHeader("Items")
@@ -72,6 +68,9 @@ func onReady(opts Options) func() {
 		mRefresh := systray.AddMenuItem("Refresh Now", "Check GitHub for updates immediately")
 
 		newSectionHeader("App")
+		mConfigStatus := systray.AddMenuItem("", "")
+		status.item = mConfigStatus
+		status.render()
 		mPrefs := systray.AddMenuItem("Preferences…", "Open config file")
 		mUpdate := systray.AddMenuItem("Check for updates", "")
 		mQuit := systray.AddMenuItem("Quit", "Quit ghnotify")
@@ -91,7 +90,18 @@ func onReady(opts Options) func() {
 		recheck := func() {
 			_, myActive := myList.update()
 			_, revActive := reviewList.update()
-			setIcon(myActive+revActive > 0)
+			status.setActivity(myActive+revActive > 0)
+		}
+
+		// Apply config.toml edits as they are saved.
+		reloader := &configReloader{store: opts.Config, status: status, builtAt: maxPRs, refresh: opts.Poll.Refresh}
+		if opts.ConfigErr != nil {
+			reloader.startupError(opts.ConfigErr)
+		}
+		if path, err := config.GetFilePath(); err != nil {
+			slog.Warn("config watch disabled", "err", err)
+		} else if err := config.Watch(ctx, path, reloader.handle); err != nil {
+			slog.Warn("config watch disabled", "err", err)
 		}
 
 		// Subscribe to poll changes.
@@ -117,6 +127,14 @@ func onReady(opts Options) func() {
 					opts.Acknowledge.AcknowledgeAll(allPRs)
 					recheck()
 				case <-mPrefs.ClickedCh:
+					openConfig()
+				case <-mConfigStatus.ClickedCh:
+					if status.needsRestart() {
+						ticker.Stop()
+						cancelUpdater()
+						relaunch()
+						return
+					}
 					openConfig()
 				case <-mClearSnooze.ClickedCh:
 					opts.Snooze.ClearAll()
