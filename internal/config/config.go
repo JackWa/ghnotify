@@ -1,6 +1,7 @@
 package config
 
 import (
+	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -59,25 +60,74 @@ func Default() *AppConfig {
 
 // Load reads the config file from disk and decodes it into an AppConfig struct.
 // If the file does not exist, returns a default config and saves it to disk.
+// If the file cannot be parsed or is invalid, it returns the default config
+// together with the error, so the app can still start and report the problem.
 func Load() (*AppConfig, error) {
 	path, err := GetFilePath()
 	if err != nil {
-		return nil, err
+		return Default(), err
 	}
 	slog.Debug("loading config", "path", path)
-	cfg := Default()
 	if _, err := os.Stat(path); os.IsNotExist(err) {
+		cfg := Default()
 		slog.Debug("config file does not exist, creating default", "path", path)
 		if saveErr := cfg.save(path); saveErr != nil {
 			slog.Warn("could not write default config", "err", saveErr)
 		}
 		return cfg, nil
 	}
-	if _, err := toml.DecodeFile(path, cfg); err != nil {
-		slog.Warn("could not parse config file", "err", err)
-		return nil, err
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return Default(), err
 	}
-	return cfg, nil
+	res := Parse(data)
+	if res.Err != nil {
+		slog.Warn("could not load config file, using defaults", "err", res.Err)
+		return Default(), res.Err
+	}
+	return res.Config, nil
+}
+
+// ParseResult is the outcome of parsing a config file.
+type ParseResult struct {
+	Config  *AppConfig // nil when Err is set
+	Unknown []string   // keys in the file that ghnotify does not recognise
+	Err     error
+}
+
+// Parse decodes data on top of the defaults and validates the result.
+func Parse(data []byte) ParseResult {
+	cfg := Default()
+	md, err := toml.Decode(string(data), cfg)
+	if err != nil {
+		return ParseResult{Err: err}
+	}
+	if err := cfg.Validate(); err != nil {
+		return ParseResult{Err: err}
+	}
+	var unknown []string
+	for _, k := range md.Undecoded() {
+		unknown = append(unknown, k.String())
+	}
+	return ParseResult{Config: cfg, Unknown: unknown}
+}
+
+// Validate reports values that cannot be used at all. Values that parse but
+// are out of range (e.g. a very short poll_interval) are still clamped by
+// their consumers, as before.
+func (c *AppConfig) Validate() error {
+	if _, err := time.ParseDuration(c.PollInterval); err != nil {
+		return fmt.Errorf("poll_interval: %w", err)
+	}
+	if c.MaxPRAge != "" {
+		if _, err := time.ParseDuration(c.MaxPRAge); err != nil {
+			return fmt.Errorf("max_pr_age: %w", err)
+		}
+	}
+	if c.MaxPRsPerSection < 1 {
+		return fmt.Errorf("max_prs_per_section: must be at least 1, got %d", c.MaxPRsPerSection)
+	}
+	return nil
 }
 
 // Save writes the AppConfig to disk at the default config file path.
