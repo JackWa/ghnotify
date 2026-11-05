@@ -24,10 +24,11 @@ build:
 	$(call PROMPT, $@)
 	CGO_ENABLED=1 go build -ldflags "$(LDFLAGS)" -o bin/$(BINARY) .
 
-#: assemble a macOS .app bundle from the local build
+#: assemble a macOS .app bundle from the local build (ad-hoc signed, so macOS allows its notifications)
 app: build
 	$(call PROMPT, $@)
 	bash scripts/make-app.sh bin/$(BINARY) $(APP_DIR)
+	codesign --force --sign - $(APP_DIR)
 
 #: install the .app bundle into /Applications
 install: app

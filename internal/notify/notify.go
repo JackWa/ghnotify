@@ -41,6 +41,16 @@ func (n *Notifier) dispatch(c poller.Change) {
 	if !ok {
 		return
 	}
+	post(title, body, c.PR.URL)
+}
+
+// post shows a notification. Clicking it opens url, when set and supported.
+// On macOS it uses the native notification center when running from the .app
+// bundle; otherwise it falls back to beeep.
+func post(title, body, url string) {
+	if nativePost(title, body, url) {
+		return
+	}
 	if err := beeep.Notify(title, body, ""); err != nil {
 		log.Printf("ghnotify: notification: %v", err)
 	}

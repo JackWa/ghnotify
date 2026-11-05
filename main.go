@@ -124,6 +124,10 @@ func run(ctx context.Context, cmd *cli.Command) error {
 	poll.Start()
 	defer poll.Stop()
 
+	// Register the notification click handler and request permission
+	// before the first notification fires.
+	notify.Init()
+
 	// Run the tray. This will block until the user quits.
 	slog.Debug("starting tray")
 	tray.Run(tray.Options{
