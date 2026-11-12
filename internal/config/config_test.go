@@ -179,3 +179,51 @@ func TestWatchReportsEditMadeBeforeWatching(t *testing.T) {
 		t.Fatal("edit made before the watcher started was not reported")
 	}
 }
+
+func TestLoadReturnsBaseline(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	path, err := GetFilePath()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, raw, err := Load()
+	if err != nil || cfg == nil {
+		t.Fatalf("first run: cfg=%v err=%v", cfg, err)
+	}
+	onDisk, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(raw) != string(onDisk) || len(raw) == 0 {
+		t.Errorf("first run baseline %q, want the file content %q", raw, onDisk)
+	}
+
+	bad := []byte(`poll_interval = "soon"`)
+	if err := os.WriteFile(path, bad, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, raw, err = Load()
+	if err == nil || cfg == nil || string(raw) != string(bad) {
+		t.Errorf("invalid file: cfg=%v raw=%q err=%v", cfg, raw, err)
+	}
+}
+
+func TestWatchUnknownBaselineIsQuiet(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.toml")
+	if err := os.WriteFile(path, []byte(`poll_interval = "60s"`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	got := make(chan ParseResult, 1)
+	if err := Watch(ctx, path, nil, func(r ParseResult) { got <- r }); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case r := <-got:
+		t.Fatalf("reported a change at startup with no baseline: %+v", r)
+	case <-time.After(watchDebounce * 3):
+	}
+}

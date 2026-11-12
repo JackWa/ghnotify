@@ -1,6 +1,7 @@
 package config
 
 import (
+	"bytes"
 	"fmt"
 	"log/slog"
 	"os"
@@ -58,18 +59,12 @@ func Default() *AppConfig {
 	}
 }
 
-// Load reads the config file from disk and decodes it into an AppConfig struct.
-// If the file does not exist, returns a default config and saves it to disk.
-// If the file cannot be parsed or is invalid, it returns the default config
-// together with the error, so the app can still start and report the problem.
-func Load() (*AppConfig, error) {
-	cfg, _, err := LoadRaw()
-	return cfg, err
-}
-
-// LoadRaw is Load, and also returns the file content the config was built
-// from, so a Watch started later can tell whether the file changed since.
-func LoadRaw() (*AppConfig, []byte, error) {
+// Load reads the config file and returns the config along with the file
+// content it was built from (nil if unknown), as the baseline for Watch.
+// If the file does not exist, it returns and saves the defaults.
+// If the file cannot be read or is invalid, it returns the defaults together
+// with the error, so the app can still start and report the problem.
+func Load() (*AppConfig, []byte, error) {
 	path, err := GetFilePath()
 	if err != nil {
 		return Default(), nil, err
@@ -78,11 +73,11 @@ func LoadRaw() (*AppConfig, []byte, error) {
 	if _, err := os.Stat(path); os.IsNotExist(err) {
 		cfg := Default()
 		slog.Debug("config file does not exist, creating default", "path", path)
-		if saveErr := cfg.save(path); saveErr != nil {
+		written, saveErr := cfg.save(path)
+		if saveErr != nil {
 			slog.Warn("could not write default config", "err", saveErr)
 		}
-		raw, _ := os.ReadFile(path)
-		return cfg, raw, nil
+		return cfg, written, nil
 	}
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -144,20 +139,22 @@ func (c *AppConfig) Save() error {
 	if err != nil {
 		return err
 	}
-	return c.save(path)
+	_, err = c.save(path)
+	return err
 }
 
-func (c *AppConfig) save(path string) error {
+// save writes the config to path and returns the bytes it wrote, or nil if
+// the write failed.
+func (c *AppConfig) save(path string) ([]byte, error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-		return err
+		return nil, err
 	}
-	f, err := os.Create(path)
-	if err != nil {
-		return err
+	var buf bytes.Buffer
+	if err := toml.NewEncoder(&buf).Encode(c); err != nil {
+		return nil, err
 	}
-	if err := toml.NewEncoder(f).Encode(c); err != nil {
-		_ = f.Close()
-		return err
+	if err := os.WriteFile(path, buf.Bytes(), 0o600); err != nil {
+		return nil, err
 	}
-	return f.Close()
+	return buf.Bytes(), nil
 }

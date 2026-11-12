@@ -17,10 +17,9 @@ const watchDebounce = 300 * time.Millisecond
 
 // Watch calls onChange with a fresh ParseResult each time the content of the
 // config file at path differs from the last content it saw, starting with
-// loaded, the bytes the running config was built from. A file edited after
-// that read but before the watcher started is therefore reported too. It watches the parent directory rather than
-// the file, because editors that save atomically replace the file, which
-// would silently end a watch on the file itself. Saves that leave the content
+// loaded (nil if unknown). It watches the parent directory rather than the
+// file, because editors that save atomically replace the file, which would
+// silently end a watch on the file itself. Saves that leave the content
 // unchanged, and moments where the file is briefly missing, are ignored.
 //
 // The watcher stops when ctx is cancelled.
@@ -37,7 +36,10 @@ func Watch(ctx context.Context, path string, loaded []byte, onChange func(ParseR
 	go func() {
 		defer func() { _ = w.Close() }()
 		last := loaded
-		timer := time.NewTimer(watchDebounce)
+		timer := time.NewTimer(0)
+		if loaded == nil {
+			timer.Stop()
+		}
 		for {
 			select {
 			case <-ctx.Done():
