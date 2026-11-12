@@ -29,7 +29,8 @@ didReceiveNotificationResponse:(UNNotificationResponse *)response
 	if ([response.actionIdentifier isEqualToString:UNNotificationDefaultActionIdentifier]) {
 		NSString *u = response.notification.request.content.userInfo[@"url"];
 		NSURL *url = u.length ? [NSURL URLWithString:u] : nil;
-		if (url) {
+		NSString *scheme = url.scheme.lowercaseString;
+		if ([scheme isEqualToString:@"https"] || [scheme isEqualToString:@"http"]) {
 			[[NSWorkspace sharedWorkspace] openURL:url];
 		}
 	}
