@@ -154,10 +154,11 @@ func relaunch() {
 	if i := strings.Index(exe, ".app/Contents/MacOS/"); i >= 0 {
 		target = exe[:i+len(".app")]
 	}
-	// The short delay lets this instance remove its tray icon first.
-	script := fmt.Sprintf("sleep 1; open -n %q", target)
+	// Wait for this process to exit so it has released its tray icon first.
+	wait := fmt.Sprintf("while kill -0 %d 2>/dev/null; do sleep 0.1; done", os.Getpid())
+	script := fmt.Sprintf("%s; open -n %q", wait, target)
 	if target == exe {
-		script = fmt.Sprintf("sleep 1; %q &", exe)
+		script = fmt.Sprintf("%s; %q &", wait, exe)
 	}
 	cmd := exec.Command("/bin/sh", "-c", script)
 	if err := cmd.Start(); err != nil {
