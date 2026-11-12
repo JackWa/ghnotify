@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os/exec"
+	"sync"
 	"time"
 
 	"github.com/getlantern/systray"
@@ -88,7 +89,10 @@ func onReady(opts Options) func() {
 
 		// recheck re-renders both PR lists and updates the icon. Called on every
 		// poll change and on the 60-second ticker to catch snooze expiry.
+		var recheckMu sync.Mutex
 		recheck := func() {
+			recheckMu.Lock()
+			defer recheckMu.Unlock()
 			_, myActive := myList.update()
 			_, revActive := reviewList.update()
 			status.setActivity(myActive+revActive > 0)
