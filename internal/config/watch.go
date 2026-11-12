@@ -39,7 +39,7 @@ func Watch(ctx context.Context, path string, loaded []byte, onChange func(ParseR
 		timer := time.NewTimer(time.Hour)
 		timer.Stop()
 		if known {
-			timer.Reset(0)
+			timer.Reset(watchDebounce)
 		}
 		for {
 			select {
