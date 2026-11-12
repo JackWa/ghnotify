@@ -41,7 +41,23 @@ func (n *Notifier) dispatch(c poller.Change) {
 	if !ok {
 		return
 	}
-	if err := beeep.Notify(title, body, ""); err != nil {
+	id := fmt.Sprintf("%s/%s/%s#%d/%v", c.PR.Server, c.PR.Owner, c.PR.Repo, c.PR.Number, c.Kind)
+	post(id, title, body, c.PR.URL)
+}
+
+var (
+	native   = nativePost
+	fallback = beeep.Notify
+)
+
+// post shows a notification. Clicking it opens url, when set and supported.
+// On macOS it uses the native notification center when running from the .app
+// bundle; otherwise it falls back to beeep.
+func post(id, title, body, url string) {
+	if native(id, title, body, url) {
+		return
+	}
+	if err := fallback(title, body, ""); err != nil {
 		log.Printf("ghnotify: notification: %v", err)
 	}
 }

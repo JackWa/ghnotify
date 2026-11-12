@@ -102,6 +102,10 @@ func runPRDetail(ctx context.Context, cmd *cli.Command) error {
 }
 
 func run(ctx context.Context, cmd *cli.Command) error {
+	// Register the notification click handler and request permission
+	// before the first notification fires.
+	notify.Init()
+
 	cfg, err := config.Load()
 	if err != nil {
 		return fmt.Errorf("load config: %w", err)
