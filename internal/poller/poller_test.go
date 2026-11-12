@@ -1,29 +1,40 @@
 package poller
 
-import "testing"
+import (
+	"testing"
 
-func TestDropRemoved(t *testing.T) {
+	"github.com/boyvinall/ghnotify/internal/config"
+)
+
+func TestDropMembership(t *testing.T) {
 	in := []Change{{Kind: ChangeAdded}, {Kind: ChangeRemoved}, {Kind: ChangeCIStatus}, {Kind: ChangeRemoved}}
-	got := dropRemoved(in)
-	if len(got) != 2 || got[0].Kind != ChangeAdded || got[1].Kind != ChangeCIStatus {
-		t.Fatalf("dropRemoved = %+v", got)
+	got := dropMembership(in)
+	if len(got) != 1 || got[0].Kind != ChangeCIStatus {
+		t.Fatalf("dropMembership = %+v", got)
 	}
 	if len(in) != 4 || in[1].Kind != ChangeRemoved {
 		t.Fatalf("input was modified: %+v", in)
 	}
 }
 
-func TestSignalQuietReplacesPendingRefresh(t *testing.T) {
-	ch := make(chan bool, 1)
-	m := &Manager{refresh: map[string]chan bool{"h": ch}}
-	m.Refresh()
-	m.Resync()
-	if got := <-ch; !got {
-		t.Fatal("pending refresh was not upgraded to quiet")
+func TestQueryKey(t *testing.T) {
+	base := config.Default()
+	same := config.Default()
+	if queryKey(base) != queryKey(same) {
+		t.Fatal("equal configs gave different keys")
 	}
-	m.Resync()
-	m.Refresh()
-	if got := <-ch; !got {
-		t.Fatal("quiet refresh was downgraded by a plain one")
+	same.PollInterval = "30s"
+	if queryKey(base) != queryKey(same) {
+		t.Fatal("poll_interval must not change the query")
+	}
+	for name, mutate := range map[string]func(*config.AppConfig){
+		"exclude_authors": func(c *config.AppConfig) { c.ExcludeAuthors = nil },
+		"max_pr_age":      func(c *config.AppConfig) { c.MaxPRAge = "24h" },
+	} {
+		c := config.Default()
+		mutate(c)
+		if queryKey(base) == queryKey(c) {
+			t.Errorf("%s did not change the key", name)
+		}
 	}
 }

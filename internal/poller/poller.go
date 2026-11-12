@@ -4,6 +4,7 @@ import (
 	"context"
 	"log/slog"
 	"math/rand"
+	"strings"
 	"sync"
 	"time"
 
@@ -22,7 +23,7 @@ type Manager struct {
 
 	mu       sync.Mutex
 	cancels  map[string]context.CancelFunc // per-server cancel
-	refresh  map[string]chan bool          // per-server refresh trigger; true means quiet
+	refresh  map[string]chan struct{}      // per-server manual-refresh trigger
 	wg       sync.WaitGroup
 	rootCtx  context.Context
 	rootStop context.CancelFunc
@@ -36,7 +37,7 @@ func NewManager(authMgr *auth.Manager, cfg *config.Store) *Manager {
 		cfg:      cfg,
 		store:    newStateStore(),
 		cancels:  make(map[string]context.CancelFunc),
-		refresh:  make(map[string]chan bool),
+		refresh:  make(map[string]chan struct{}),
 		rootCtx:  ctx,
 		rootStop: cancel,
 	}
@@ -95,34 +96,12 @@ func (m *Manager) Stop() {
 // Refresh signals every running server loop to poll immediately, bypassing
 // the poll interval timer. Safe to call even if a refresh is already pending.
 func (m *Manager) Refresh() {
-	m.signal(false)
-}
-
-// Resync polls immediately like Refresh, but does not report PRs that drop out
-// of the results as removed. Use it after a config change that narrows the
-// queries, where a PR disappearing does not mean it was closed or merged.
-func (m *Manager) Resync() {
-	m.signal(true)
-}
-
-func (m *Manager) signal(quiet bool) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	for _, ch := range m.refresh {
 		select {
-		case ch <- quiet:
+		case ch <- struct{}{}:
 		default:
-			if quiet {
-				// Replace a pending plain refresh: the quiet poll does the same work.
-				select {
-				case <-ch:
-				default:
-				}
-				select {
-				case ch <- true:
-				default:
-				}
-			}
 		}
 	}
 }
@@ -139,20 +118,21 @@ func (m *Manager) startServer(host string) {
 	slog.Debug("starting server poll loop", "host", host)
 	ctx, cancel := context.WithCancel(m.rootCtx)
 	m.cancels[host] = cancel
-	refresh := make(chan bool, 1)
+	refresh := make(chan struct{}, 1)
 	m.refresh[host] = refresh
 
 	m.wg.Add(1)
 	go m.runServerLoop(ctx, host, refresh)
 }
 
-func (m *Manager) runServerLoop(ctx context.Context, host string, refresh <-chan bool) {
+func (m *Manager) runServerLoop(ctx context.Context, host string, refresh <-chan struct{}) {
 	defer m.wg.Done()
 
 	slog.Debug("poll loop started", "host", host, "interval", m.pollInterval())
 
 	// Poll immediately on start.
-	m.pollServer(ctx, host, false)
+	var lastQuery string
+	m.pollServer(ctx, host, &lastQuery)
 
 	for {
 		// Re-read each cycle so a reloaded poll_interval takes effect.
@@ -161,17 +141,17 @@ func (m *Manager) runServerLoop(ctx context.Context, host string, refresh <-chan
 		case <-ctx.Done():
 			slog.Debug("poll loop stopped", "host", host)
 			return
-		case quiet := <-refresh:
-			slog.Debug("manual refresh requested", "host", host, "quiet", quiet)
-			m.pollServer(ctx, host, quiet)
+		case <-refresh:
+			slog.Debug("manual refresh requested", "host", host)
+			m.pollServer(ctx, host, &lastQuery)
 		case <-time.After(jitter(interval)):
 			slog.Debug("poll interval elapsed", "host", host)
-			m.pollServer(ctx, host, false)
+			m.pollServer(ctx, host, &lastQuery)
 		}
 	}
 }
 
-func (m *Manager) pollServer(ctx context.Context, host string, quiet bool) {
+func (m *Manager) pollServer(ctx context.Context, host string, lastQuery *string) {
 	token, err := m.authMgr.GetToken(host)
 	if err != nil || token == "" {
 		return // not authenticated; skip silently
@@ -181,9 +161,13 @@ func (m *Manager) pollServer(ctx context.Context, host string, quiet bool) {
 	defer cancel()
 
 	slog.Debug("polling server", "host", host)
-	client := github.NewClient(host, token, m.cfg.Get().ExcludeAuthors)
+	cfg := m.cfg.Get()
+	client := github.NewClient(host, token, cfg.ExcludeAuthors)
 
 	since := m.prAgeCutoff()
+	query := queryKey(cfg)
+	requeried := *lastQuery != "" && *lastQuery != query
+	*lastQuery = query
 
 	myPRs, err := client.FetchMyPRs(tctx, since)
 	if err != nil {
@@ -196,12 +180,11 @@ func (m *Manager) pollServer(ctx context.Context, host string, quiet bool) {
 	}
 
 	changes := m.store.Update(host, myPRs, reviews)
-	if quiet {
-		changes = dropRemoved(changes)
+	if requeried {
+		changes = dropMembership(changes)
 	}
 	slog.Debug("poll complete", "host", host, "myPRs", len(myPRs), "reviewRequests", len(reviews), "changes", len(changes))
-	// A quiet poll always reports, so the caller re-renders PRs that were dropped.
-	if (len(changes) > 0 || quiet) && m.onChange != nil {
+	if (len(changes) > 0 || requeried) && m.onChange != nil {
 		m.onChange(changes)
 	}
 }
@@ -214,10 +197,17 @@ func (m *Manager) pollInterval() time.Duration {
 	return d
 }
 
-func dropRemoved(changes []Change) []Change {
+// queryKey identifies the settings that decide which PRs a poll returns.
+func queryKey(cfg *config.AppConfig) string {
+	return strings.Join(cfg.ExcludeAuthors, ",") + "|" + cfg.MaxPRAge
+}
+
+// dropMembership removes the changes that only reflect a PR entering or
+// leaving the results, which a changed query causes without any PR event.
+func dropMembership(changes []Change) []Change {
 	out := changes[:0:0]
 	for _, c := range changes {
-		if c.Kind != ChangeRemoved {
+		if c.Kind != ChangeAdded && c.Kind != ChangeRemoved {
 			out = append(out, c)
 		}
 	}
