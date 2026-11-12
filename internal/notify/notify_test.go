@@ -194,7 +194,7 @@ func TestAppUsesNativePath(t *testing.T) {
 	if len(*natives) != 1 || len(*fallbacks) != 0 {
 		t.Fatalf("native=%d fallback=%d, want 1 and 0", len(*natives), len(*fallbacks))
 	}
-	if got := (*natives)[0]; got.title != "title" || got.body != "body" {
-		t.Errorf("native got %+v", got)
+	if got := (*natives)[0]; got.id != "" || got.title != "title" || got.body != "body" {
+		t.Errorf("native got %+v, want an empty id so each notification is new", got)
 	}
 }

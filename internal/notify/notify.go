@@ -129,6 +129,7 @@ func ciLabel(s github.CIStatus) string {
 
 // App posts a notification about ghnotify itself, such as a config reload.
 // It is not gated by any preference: these only fire after the user acts.
+// It blocks until the notification is posted or times out.
 func App(title, body string) {
-	post("ghnotify/app", title, body, "")
+	post("", title, body, "")
 }

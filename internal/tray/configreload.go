@@ -88,14 +88,14 @@ type configReloader struct {
 // startupError reports a config file that could not be loaded at startup.
 func (r *configReloader) startupError(err error) {
 	r.status.set(err, false)
-	notify.App("ghnotify: config error", err.Error()+"\nUsing default settings until fixed.")
+	go notify.App("ghnotify: config error", err.Error()+"\nUsing default settings until fixed.")
 }
 
 func (r *configReloader) handle(res config.ParseResult) {
 	if res.Err != nil {
 		slog.Warn("config reload failed, keeping previous config", "err", res.Err)
 		r.status.set(res.Err, r.restartPending(r.store.Get()))
-		notify.App("ghnotify: config error", res.Err.Error()+"\nPrevious settings still in use.")
+		go notify.App("ghnotify: config error", res.Err.Error()+"\nPrevious settings still in use.")
 		return
 	}
 
@@ -109,7 +109,7 @@ func (r *configReloader) handle(res config.ParseResult) {
 	if len(changes) > 0 {
 		r.refresh()
 	}
-	notify.App(reloadTitle(changes, restart), reloadBody(changes, res.Unknown, restart))
+	go notify.App(reloadTitle(changes, restart), reloadBody(changes, res.Unknown, restart))
 }
 
 func (r *configReloader) restartPending(cfg *config.AppConfig) bool {
