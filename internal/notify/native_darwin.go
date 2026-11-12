@@ -16,7 +16,8 @@ import "unsafe"
 // owned by ghnotify.app rather than by Script Editor (which is what
 // osascript's "display notification" uses). Clicking the notification opens
 // url, when set. It returns false when the process is not running from an
-// .app bundle, where UNUserNotificationCenter is unavailable.
+// .app bundle, when notifications are denied, or when posting fails,
+// so the caller can fall back to another mechanism.
 func nativePost(title, body, url string) bool {
 	ct := C.CString(title)
 	cb := C.CString(body)

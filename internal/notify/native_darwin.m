@@ -70,11 +70,30 @@ static NSString *str(const char *s) {
 	return v ?: @"";
 }
 
+static const int64_t ghnTimeout = 5 * NSEC_PER_SEC;
+
+static BOOL ghnDenied(UNUserNotificationCenter *center) {
+	__block UNAuthorizationStatus status = UNAuthorizationStatusNotDetermined;
+	dispatch_semaphore_t done = dispatch_semaphore_create(0);
+	[center getNotificationSettingsWithCompletionHandler:^(UNNotificationSettings *settings) {
+		status = settings.authorizationStatus;
+		dispatch_semaphore_signal(done);
+	}];
+	if (dispatch_semaphore_wait(done, dispatch_time(DISPATCH_TIME_NOW, ghnTimeout)) != 0) {
+		return NO;
+	}
+	return status == UNAuthorizationStatusDenied;
+}
+
 int ghn_post(const char *title, const char *body, const char *url) {
 	if (!ghn_init()) {
 		return 0;
 	}
 	@autoreleasepool {
+		UNUserNotificationCenter *center = [UNUserNotificationCenter currentNotificationCenter];
+		if (ghnDenied(center)) {
+			return 0;
+		}
 		UNMutableNotificationContent *content = [UNMutableNotificationContent new];
 		content.title = str(title);
 		content.body = str(body);
@@ -85,13 +104,20 @@ int ghn_post(const char *title, const char *body, const char *url) {
 		UNNotificationRequest *req = [UNNotificationRequest requestWithIdentifier:[[NSUUID UUID] UUIDString]
 		                                                                  content:content
 		                                                                  trigger:nil];
-		[[UNUserNotificationCenter currentNotificationCenter]
-			addNotificationRequest:req
-			 withCompletionHandler:^(NSError *error) {
-				if (error != nil) {
-					NSLog(@"ghnotify: notification: %@", error);
-				}
-			}];
+		__block BOOL ok = NO;
+		dispatch_semaphore_t done = dispatch_semaphore_create(0);
+		[center addNotificationRequest:req
+		         withCompletionHandler:^(NSError *error) {
+			if (error != nil) {
+				NSLog(@"ghnotify: notification: %@", error);
+			} else {
+				ok = YES;
+			}
+			dispatch_semaphore_signal(done);
+		}];
+		if (dispatch_semaphore_wait(done, dispatch_time(DISPATCH_TIME_NOW, ghnTimeout)) != 0) {
+			return 1;
+		}
+		return ok ? 1 : 0;
 	}
-	return 1;
 }
