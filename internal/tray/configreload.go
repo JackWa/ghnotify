@@ -1,10 +1,10 @@
 package tray
 
 import (
-	"fmt"
 	"log/slog"
 	"os"
 	"os/exec"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -154,13 +154,14 @@ func relaunch() {
 	if i := strings.Index(exe, ".app/Contents/MacOS/"); i >= 0 {
 		target = exe[:i+len(".app")]
 	}
-	// Wait for this process to exit so it has released its tray icon first.
-	wait := fmt.Sprintf("while kill -0 %d 2>/dev/null; do sleep 0.1; done", os.Getpid())
-	script := fmt.Sprintf("%s; open -n %q", wait, target)
-	if target == exe {
-		script = fmt.Sprintf("%s; %q &", wait, exe)
+	// Wait up to 10s for this process to exit so it has released its tray icon.
+	// The target is a positional argument so the shell never parses the path.
+	const wait = `i=0; while kill -0 "$1" 2>/dev/null && [ $i -lt 100 ]; do sleep 0.1; i=$((i+1)); done; `
+	script := wait + `"$2" &`
+	if target != exe {
+		script = wait + `open -n "$2"`
 	}
-	cmd := exec.Command("/bin/sh", "-c", script)
+	cmd := exec.Command("/bin/sh", "-c", script, "sh", strconv.Itoa(os.Getpid()), target)
 	if err := cmd.Start(); err != nil {
 		slog.Warn("relaunch failed", "err", err)
 		return
