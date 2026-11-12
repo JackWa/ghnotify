@@ -23,12 +23,17 @@ func TestQueryKey(t *testing.T) {
 	if queryKey(base) != queryKey(same) {
 		t.Fatal("equal configs gave different keys")
 	}
+	same.ExcludeAuthors = []string{"app/dependabot", "app/renovate"}
+	if queryKey(base) != queryKey(same) {
+		t.Fatal("author order must not change the query")
+	}
 	same.PollInterval = "30s"
 	if queryKey(base) != queryKey(same) {
 		t.Fatal("poll_interval must not change the query")
 	}
 	for name, mutate := range map[string]func(*config.AppConfig){
 		"exclude_authors": func(c *config.AppConfig) { c.ExcludeAuthors = nil },
+		"joined authors":  func(c *config.AppConfig) { c.ExcludeAuthors = []string{"app/renovate,app/dependabot"} },
 		"max_pr_age":      func(c *config.AppConfig) { c.MaxPRAge = "24h" },
 	} {
 		c := config.Default()

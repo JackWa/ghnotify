@@ -4,6 +4,7 @@ import (
 	"context"
 	"log/slog"
 	"math/rand"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -164,19 +165,22 @@ func (m *Manager) pollServer(ctx context.Context, host string, lastQuery *string
 	cfg := m.cfg.Get()
 	client := github.NewClient(host, token, cfg.ExcludeAuthors)
 
-	since := m.prAgeCutoff()
+	since := ageCutoff(cfg)
 	query := queryKey(cfg)
 	requeried := *lastQuery != "" && *lastQuery != query
-	*lastQuery = query
 
-	myPRs, err := client.FetchMyPRs(tctx, since)
-	if err != nil {
-		slog.Error("poll failed", "host", host, "query", "my PRs", "err", err)
+	myPRs, myErr := client.FetchMyPRs(tctx, since)
+	if myErr != nil {
+		slog.Error("poll failed", "host", host, "query", "my PRs", "err", myErr)
 	}
 
-	reviews, err := client.FetchReviewRequests(tctx, since)
-	if err != nil {
-		slog.Error("poll failed", "host", host, "query", "review requests", "err", err)
+	reviews, reviewErr := client.FetchReviewRequests(tctx, since)
+	if reviewErr != nil {
+		slog.Error("poll failed", "host", host, "query", "review requests", "err", reviewErr)
+	}
+
+	if myErr == nil && reviewErr == nil {
+		*lastQuery = query
 	}
 
 	changes := m.store.Update(host, myPRs, reviews)
@@ -199,7 +203,9 @@ func (m *Manager) pollInterval() time.Duration {
 
 // queryKey identifies the settings that decide which PRs a poll returns.
 func queryKey(cfg *config.AppConfig) string {
-	return strings.Join(cfg.ExcludeAuthors, ",") + "|" + cfg.MaxPRAge
+	authors := slices.Clone(cfg.ExcludeAuthors)
+	slices.Sort(authors)
+	return strings.Join(authors, "\x00") + "\x01" + cfg.MaxPRAge
 }
 
 // dropMembership removes the changes that only reflect a PR entering or
@@ -225,7 +231,11 @@ func jitter(d time.Duration) time.Duration {
 // prAgeCutoff returns the earliest UpdatedAt time a PR must have to be shown.
 // Returns zero time if no max age is configured.
 func (m *Manager) prAgeCutoff() time.Time {
-	age := m.cfg.Get().ParseMaxPRAge()
+	return ageCutoff(m.cfg.Get())
+}
+
+func ageCutoff(cfg *config.AppConfig) time.Time {
+	age := cfg.ParseMaxPRAge()
 	if age <= 0 {
 		return time.Time{}
 	}
