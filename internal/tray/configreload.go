@@ -84,19 +84,40 @@ type configReloader struct {
 	builtAt int    // max_prs_per_section the menu was built with
 	refresh func() // re-poll so new filters and intervals apply now
 	recheck func() // re-render the lists and icon with the new notification prefs
+
+	notifyOnce sync.Once
+	notifyCh   chan [2]string // title, body; drained in order by one goroutine
+}
+
+// notify queues a notification. Posting can block for seconds, so it must
+// not hold up a reload, and a single worker keeps the notifications in order.
+func (r *configReloader) notify(title, body string) {
+	r.notifyOnce.Do(func() {
+		r.notifyCh = make(chan [2]string, 16)
+		go func() {
+			for n := range r.notifyCh {
+				notify.App(n[0], n[1])
+			}
+		}()
+	})
+	select {
+	case r.notifyCh <- [2]string{title, body}:
+	default:
+		slog.Warn("notification queue full, dropping", "title", title)
+	}
 }
 
 // startupError reports a config file that could not be loaded at startup.
 func (r *configReloader) startupError(err error) {
 	r.status.set(err, false)
-	go notify.App("ghnotify: config error", err.Error()+"\nUsing default settings until fixed.")
+	r.notify("ghnotify: config error", err.Error()+"\nUsing default settings until fixed.")
 }
 
 func (r *configReloader) handle(res config.ParseResult) {
 	if res.Err != nil {
 		slog.Warn("config reload failed, keeping previous config", "err", res.Err)
 		r.status.set(res.Err, r.restartPending(r.store.Get()))
-		go notify.App("ghnotify: config error", res.Err.Error()+"\nPrevious settings still in use.")
+		r.notify("ghnotify: config error", res.Err.Error()+"\nPrevious settings still in use.")
 		return
 	}
 
@@ -110,7 +131,7 @@ func (r *configReloader) handle(res config.ParseResult) {
 	if len(changes) > 0 {
 		r.refresh()
 	}
-	go notify.App(reloadTitle(changes, restart), reloadBody(changes, res.Unknown, restart))
+	r.notify(reloadTitle(changes, restart), reloadBody(changes, res.Unknown, restart))
 }
 
 func (r *configReloader) restartPending(cfg *config.AppConfig) bool {
