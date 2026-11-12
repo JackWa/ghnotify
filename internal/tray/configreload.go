@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 
 	"github.com/getlantern/systray"
 
@@ -154,14 +155,16 @@ func relaunch() {
 	if i := strings.Index(exe, ".app/Contents/MacOS/"); i >= 0 {
 		target = exe[:i+len(".app")]
 	}
-	// Wait up to 10s for this process to exit so it has released its tray icon.
-	// The target is a positional argument so the shell never parses the path.
-	const wait = `i=0; while kill -0 "$1" 2>/dev/null && [ $i -lt 100 ]; do sleep 0.1; i=$((i+1)); done; `
-	script := wait + `"$2" &`
+	launch := `"$2" &`
 	if target != exe {
-		script = wait + `open -n "$2"`
+		launch = `open -n "$2"`
 	}
+	// Wait up to 10s for this process to exit and release its tray icon; if it
+	// is still alive, give up rather than start a second instance. The target
+	// is a positional argument so the shell never parses the path.
+	script := `i=0; while kill -0 "$1" 2>/dev/null; do [ $i -ge 100 ] && exit 1; sleep 0.1; i=$((i+1)); done; ` + launch
 	cmd := exec.Command("/bin/sh", "-c", script, "sh", strconv.Itoa(os.Getpid()), target)
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 	if err := cmd.Start(); err != nil {
 		slog.Warn("relaunch failed", "err", err)
 		return
