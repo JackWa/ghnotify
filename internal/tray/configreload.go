@@ -1,6 +1,7 @@
 package tray
 
 import (
+	"fmt"
 	"log/slog"
 	"os"
 	"os/exec"
@@ -164,12 +165,12 @@ func reloadBody(changes, unknown []string, restart bool) string {
 	return strings.Join(lines, "\n")
 }
 
-// relaunch starts a new copy of ghnotify once this one has exited, then quits.
-func relaunch() {
+// relaunch starts a helper that launches a new copy of ghnotify once this
+// process has exited. The caller must quit after it returns nil.
+func relaunch() error {
 	exe, err := os.Executable()
 	if err != nil {
-		slog.Warn("relaunch: cannot find executable", "err", err)
-		return
+		return fmt.Errorf("find executable: %w", err)
 	}
 	// Inside a bundle, relaunch the .app so macOS treats it as the same app.
 	target := exe
@@ -187,10 +188,9 @@ func relaunch() {
 	cmd := exec.Command("/bin/sh", "-c", script, "sh", strconv.Itoa(os.Getpid()), target)
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 	if err := cmd.Start(); err != nil {
-		slog.Warn("relaunch failed", "err", err)
-		return
+		return fmt.Errorf("start helper: %w", err)
 	}
-	systray.Quit()
+	return nil
 }
 
 func truncate(s string, n int) string {

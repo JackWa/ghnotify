@@ -136,9 +136,13 @@ func onReady(opts Options) func() {
 					openConfig()
 				case <-mConfigStatus.ClickedCh:
 					if status.needsRestart() {
+						if err := relaunch(); err != nil {
+							slog.Error("relaunch failed, staying open", "err", err)
+							continue
+						}
 						ticker.Stop()
 						cancelUpdater()
-						relaunch()
+						systray.Quit()
 						return
 					}
 					openConfig()
