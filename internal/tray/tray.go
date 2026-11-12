@@ -94,7 +94,7 @@ func onReady(opts Options) func() {
 		}
 
 		// Apply config.toml edits as they are saved.
-		reloader := &configReloader{store: opts.Config, status: status, builtAt: maxPRs, refresh: opts.Poll.Refresh, recheck: recheck}
+		reloader := &configReloader{store: opts.Config, status: status, builtAt: maxPRs, refresh: opts.Poll.Resync, recheck: recheck}
 		if opts.ConfigErr != nil {
 			reloader.startupError(opts.ConfigErr)
 		}

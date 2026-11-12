@@ -22,7 +22,7 @@ type Manager struct {
 
 	mu       sync.Mutex
 	cancels  map[string]context.CancelFunc // per-server cancel
-	refresh  map[string]chan struct{}      // per-server manual-refresh trigger
+	refresh  map[string]chan bool          // per-server refresh trigger; true means quiet
 	wg       sync.WaitGroup
 	rootCtx  context.Context
 	rootStop context.CancelFunc
@@ -36,7 +36,7 @@ func NewManager(authMgr *auth.Manager, cfg *config.Store) *Manager {
 		cfg:      cfg,
 		store:    newStateStore(),
 		cancels:  make(map[string]context.CancelFunc),
-		refresh:  make(map[string]chan struct{}),
+		refresh:  make(map[string]chan bool),
 		rootCtx:  ctx,
 		rootStop: cancel,
 	}
@@ -95,12 +95,34 @@ func (m *Manager) Stop() {
 // Refresh signals every running server loop to poll immediately, bypassing
 // the poll interval timer. Safe to call even if a refresh is already pending.
 func (m *Manager) Refresh() {
+	m.signal(false)
+}
+
+// Resync polls immediately like Refresh, but does not report PRs that drop out
+// of the results as removed. Use it after a config change that narrows the
+// queries, where a PR disappearing does not mean it was closed or merged.
+func (m *Manager) Resync() {
+	m.signal(true)
+}
+
+func (m *Manager) signal(quiet bool) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	for _, ch := range m.refresh {
 		select {
-		case ch <- struct{}{}:
+		case ch <- quiet:
 		default:
+			if quiet {
+				// Replace a pending plain refresh: the quiet poll does the same work.
+				select {
+				case <-ch:
+				default:
+				}
+				select {
+				case ch <- true:
+				default:
+				}
+			}
 		}
 	}
 }
@@ -117,20 +139,20 @@ func (m *Manager) startServer(host string) {
 	slog.Debug("starting server poll loop", "host", host)
 	ctx, cancel := context.WithCancel(m.rootCtx)
 	m.cancels[host] = cancel
-	refresh := make(chan struct{}, 1)
+	refresh := make(chan bool, 1)
 	m.refresh[host] = refresh
 
 	m.wg.Add(1)
 	go m.runServerLoop(ctx, host, refresh)
 }
 
-func (m *Manager) runServerLoop(ctx context.Context, host string, refresh <-chan struct{}) {
+func (m *Manager) runServerLoop(ctx context.Context, host string, refresh <-chan bool) {
 	defer m.wg.Done()
 
 	slog.Debug("poll loop started", "host", host, "interval", m.pollInterval())
 
 	// Poll immediately on start.
-	m.pollServer(ctx, host)
+	m.pollServer(ctx, host, false)
 
 	for {
 		// Re-read each cycle so a reloaded poll_interval takes effect.
@@ -139,17 +161,17 @@ func (m *Manager) runServerLoop(ctx context.Context, host string, refresh <-chan
 		case <-ctx.Done():
 			slog.Debug("poll loop stopped", "host", host)
 			return
-		case <-refresh:
-			slog.Debug("manual refresh requested", "host", host)
-			m.pollServer(ctx, host)
+		case quiet := <-refresh:
+			slog.Debug("manual refresh requested", "host", host, "quiet", quiet)
+			m.pollServer(ctx, host, quiet)
 		case <-time.After(jitter(interval)):
 			slog.Debug("poll interval elapsed", "host", host)
-			m.pollServer(ctx, host)
+			m.pollServer(ctx, host, false)
 		}
 	}
 }
 
-func (m *Manager) pollServer(ctx context.Context, host string) {
+func (m *Manager) pollServer(ctx context.Context, host string, quiet bool) {
 	token, err := m.authMgr.GetToken(host)
 	if err != nil || token == "" {
 		return // not authenticated; skip silently
@@ -174,8 +196,12 @@ func (m *Manager) pollServer(ctx context.Context, host string) {
 	}
 
 	changes := m.store.Update(host, myPRs, reviews)
+	if quiet {
+		changes = dropRemoved(changes)
+	}
 	slog.Debug("poll complete", "host", host, "myPRs", len(myPRs), "reviewRequests", len(reviews), "changes", len(changes))
-	if len(changes) > 0 && m.onChange != nil {
+	// A quiet poll always reports, so the caller re-renders PRs that were dropped.
+	if (len(changes) > 0 || quiet) && m.onChange != nil {
 		m.onChange(changes)
 	}
 }
@@ -186,6 +212,16 @@ func (m *Manager) pollInterval() time.Duration {
 		return 300 * time.Second
 	}
 	return d
+}
+
+func dropRemoved(changes []Change) []Change {
+	out := changes[:0:0]
+	for _, c := range changes {
+		if c.Kind != ChangeRemoved {
+			out = append(out, c)
+		}
+	}
+	return out
 }
 
 func jitter(d time.Duration) time.Duration {
