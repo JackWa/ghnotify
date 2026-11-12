@@ -3,7 +3,7 @@
 package notify
 
 /*
-#cgo CFLAGS: -x objective-c -fobjc-arc
+#cgo CFLAGS: -fobjc-arc
 #cgo LDFLAGS: -framework Foundation -framework AppKit -framework UserNotifications
 #include <stdlib.h>
 #include "native_darwin.h"
