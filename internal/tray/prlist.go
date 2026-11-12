@@ -70,6 +70,9 @@ func (l *prList) build() {
 // It filters snoozed PRs, sorts, caps at maxItems, and returns the visible and
 // active counts. visible drives the menu header; active drives the tray icon.
 func (l *prList) update() (visible, active int) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
 	prs := l.getPRs()
 
 	// Filter snoozed, detect expiry, collect visible PRs.
@@ -105,9 +108,6 @@ func (l *prList) update() (visible, active int) {
 		display = visiblePRs[:l.maxItems]
 		overflow = total - l.maxItems
 	}
-
-	l.mu.Lock()
-	defer l.mu.Unlock()
 
 	// Assign PRs to slots.
 	for i, slot := range l.slots {
