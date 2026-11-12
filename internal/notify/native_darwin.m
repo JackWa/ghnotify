@@ -85,7 +85,7 @@ static BOOL ghnDenied(UNUserNotificationCenter *center) {
 	return status == UNAuthorizationStatusDenied;
 }
 
-int ghn_post(const char *title, const char *body, const char *url) {
+int ghn_post(const char *ident, const char *title, const char *body, const char *url) {
 	if (!ghn_init()) {
 		return 0;
 	}
@@ -101,7 +101,11 @@ int ghn_post(const char *title, const char *body, const char *url) {
 		if (u.length) {
 			content.userInfo = @{@"url" : u};
 		}
-		UNNotificationRequest *req = [UNNotificationRequest requestWithIdentifier:[[NSUUID UUID] UUIDString]
+		NSString *identifier = str(ident);
+		if (!identifier.length) {
+			identifier = [[NSUUID UUID] UUIDString];
+		}
+		UNNotificationRequest *req = [UNNotificationRequest requestWithIdentifier:identifier
 		                                                                  content:content
 		                                                                  trigger:nil];
 		__block BOOL ok = NO;

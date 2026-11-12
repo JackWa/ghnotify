@@ -18,14 +18,16 @@ import "unsafe"
 // url, when set. It returns false when the process is not running from an
 // .app bundle, when notifications are denied, or when posting fails,
 // so the caller can fall back to another mechanism.
-func nativePost(title, body, url string) bool {
+func nativePost(id, title, body, url string) bool {
+	ci := C.CString(id)
 	ct := C.CString(title)
 	cb := C.CString(body)
 	cu := C.CString(url)
+	defer C.free(unsafe.Pointer(ci))
 	defer C.free(unsafe.Pointer(ct))
 	defer C.free(unsafe.Pointer(cb))
 	defer C.free(unsafe.Pointer(cu))
-	return C.ghn_post(ct, cb, cu) != 0
+	return C.ghn_post(ci, ct, cb, cu) != 0
 }
 
 // Init registers the click handler and asks for notification permission.
