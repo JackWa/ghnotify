@@ -227,3 +227,27 @@ func TestWatchUnknownBaselineIsQuiet(t *testing.T) {
 	case <-time.After(watchDebounce * 3):
 	}
 }
+
+func TestWatchEmptyFileAfterUnknownBaseline(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.toml")
+	if err := os.WriteFile(path, []byte(`poll_interval = "60s"`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	got := make(chan ParseResult, 1)
+	if err := Watch(ctx, path, nil, func(r ParseResult) { got <- r }); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case r := <-got:
+		if r.Err != nil || r.Config.PollInterval != "120s" {
+			t.Fatalf("got %+v, want the defaults", r)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("an empty file was ignored because the baseline was unknown")
+	}
+}

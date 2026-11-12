@@ -2,7 +2,9 @@ package config
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
+	"io/fs"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -70,7 +72,8 @@ func Load() (*AppConfig, []byte, error) {
 		return Default(), nil, err
 	}
 	slog.Debug("loading config", "path", path)
-	if _, err := os.Stat(path); os.IsNotExist(err) {
+	data, err := os.ReadFile(path)
+	if errors.Is(err, fs.ErrNotExist) {
 		cfg := Default()
 		slog.Debug("config file does not exist, creating default", "path", path)
 		written, saveErr := cfg.save(path)
@@ -79,7 +82,6 @@ func Load() (*AppConfig, []byte, error) {
 		}
 		return cfg, written, nil
 	}
-	data, err := os.ReadFile(path)
 	if err != nil {
 		return Default(), nil, err
 	}
@@ -153,7 +155,7 @@ func (c *AppConfig) save(path string) ([]byte, error) {
 	if err := toml.NewEncoder(&buf).Encode(c); err != nil {
 		return nil, err
 	}
-	if err := os.WriteFile(path, buf.Bytes(), 0o600); err != nil {
+	if err := os.WriteFile(path, buf.Bytes(), 0o644); err != nil {
 		return nil, err
 	}
 	return buf.Bytes(), nil

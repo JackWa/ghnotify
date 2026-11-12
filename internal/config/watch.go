@@ -35,10 +35,11 @@ func Watch(ctx context.Context, path string, loaded []byte, onChange func(ParseR
 
 	go func() {
 		defer func() { _ = w.Close() }()
-		last := loaded
-		timer := time.NewTimer(0)
-		if loaded == nil {
-			timer.Stop()
+		last, known := loaded, loaded != nil
+		timer := time.NewTimer(time.Hour)
+		timer.Stop()
+		if known {
+			timer.Reset(0)
 		}
 		for {
 			select {
@@ -63,10 +64,10 @@ func Watch(ctx context.Context, path string, loaded []byte, onChange func(ParseR
 					slog.Debug("config file unreadable, ignoring", "err", err)
 					continue
 				}
-				if bytes.Equal(data, last) {
+				if known && bytes.Equal(data, last) {
 					continue
 				}
-				last = data
+				last, known = data, true
 				onChange(Parse(data))
 			}
 		}
