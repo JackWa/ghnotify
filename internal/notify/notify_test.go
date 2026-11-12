@@ -187,3 +187,14 @@ func TestDispatch(t *testing.T) {
 		}
 	})
 }
+
+func TestAppUsesNativePath(t *testing.T) {
+	natives, fallbacks := stubPost(t, true)
+	App("title", "body")
+	if len(*natives) != 1 || len(*fallbacks) != 0 {
+		t.Fatalf("native=%d fallback=%d, want 1 and 0", len(*natives), len(*fallbacks))
+	}
+	if got := (*natives)[0]; got.title != "title" || got.body != "body" {
+		t.Errorf("native got %+v", got)
+	}
+}

@@ -130,7 +130,5 @@ func ciLabel(s github.CIStatus) string {
 // App posts a notification about ghnotify itself, such as a config reload.
 // It is not gated by any preference: these only fire after the user acts.
 func App(title, body string) {
-	if err := beeep.Notify(title, body, ""); err != nil {
-		log.Printf("ghnotify: notification: %v", err)
-	}
+	post("ghnotify/app", title, body, "")
 }
