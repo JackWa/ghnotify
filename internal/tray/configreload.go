@@ -85,6 +85,9 @@ type configReloader struct {
 	builtAt int    // max_prs_per_section the menu was built with
 	refresh func() // re-poll so new filters and intervals apply now
 	recheck func() // re-render the lists and icon with the new notification prefs
+	// rebaseAck keeps acknowledged PRs acknowledged when the notification
+	// prefs change; it takes the prefs they were acknowledged under.
+	rebaseAck func(old *config.NotificationConfig)
 
 	notifyOnce sync.Once
 	notifyCh   chan [2]string // title, body; drained in order by one goroutine
@@ -122,7 +125,11 @@ func (r *configReloader) handle(res config.ParseResult) {
 		return
 	}
 
-	changes := config.Diff(r.store.Get(), res.Config)
+	old := r.store.Get()
+	changes := config.Diff(old, res.Config)
+	if old.Notifications != res.Config.Notifications {
+		r.rebaseAck(&old.Notifications)
+	}
 	r.store.Set(res.Config)
 	restart := r.restartPending(res.Config)
 	r.status.set(nil, restart)
