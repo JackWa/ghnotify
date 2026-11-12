@@ -19,7 +19,8 @@ import (
 // Options bundles all dependencies for the tray.
 type Options struct {
 	Config      *config.Store
-	ConfigErr   error // non-nil if config.toml could not be loaded at startup
+	ConfigErr   error  // non-nil if config.toml could not be loaded at startup
+	ConfigRaw   []byte // config.toml content the startup config was built from
 	Auth        *auth.Manager
 	Poll        *poller.Manager
 	Snooze      *poller.SnoozeStore
@@ -100,7 +101,7 @@ func onReady(opts Options) func() {
 		}
 		if path, err := config.GetFilePath(); err != nil {
 			slog.Warn("config watch disabled", "err", err)
-		} else if err := config.Watch(ctx, path, reloader.handle); err != nil {
+		} else if err := config.Watch(ctx, path, opts.ConfigRaw, reloader.handle); err != nil {
 			slog.Warn("config watch disabled", "err", err)
 		}
 

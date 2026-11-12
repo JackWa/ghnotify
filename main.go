@@ -108,7 +108,7 @@ func run(ctx context.Context, cmd *cli.Command) error {
 
 	// A bad config file no longer stops the app: Load falls back to the
 	// defaults and the tray reports the error until the file is fixed.
-	cfg, cfgErr := config.Load()
+	cfg, cfgRaw, cfgErr := config.LoadRaw()
 	cfgStore := config.NewStore(cfg)
 
 	snoozePath, err := config.SnoozeFilePath()
@@ -133,6 +133,7 @@ func run(ctx context.Context, cmd *cli.Command) error {
 	tray.Run(tray.Options{
 		Config:      cfgStore,
 		ConfigErr:   cfgErr,
+		ConfigRaw:   cfgRaw,
 		Auth:        mgr,
 		Poll:        poll,
 		Snooze:      snooze,

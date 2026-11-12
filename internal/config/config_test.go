@@ -97,7 +97,7 @@ func TestWatch(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	got := make(chan ParseResult, 10)
-	if err := Watch(ctx, path, func(r ParseResult) { got <- r }); err != nil {
+	if err := Watch(ctx, path, []byte(`poll_interval = "120s"`), func(r ParseResult) { got <- r }); err != nil {
 		t.Fatal(err)
 	}
 
@@ -155,5 +155,27 @@ func TestWatch(t *testing.T) {
 	}
 	if r := next(); r.Err == nil {
 		t.Fatalf("want error, got %+v", r)
+	}
+}
+
+func TestWatchReportsEditMadeBeforeWatching(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.toml")
+	if err := os.WriteFile(path, []byte(`poll_interval = "60s"`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	got := make(chan ParseResult, 1)
+	loaded := []byte(`poll_interval = "120s"`)
+	if err := Watch(ctx, path, loaded, func(r ParseResult) { got <- r }); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case r := <-got:
+		if r.Err != nil || r.Config.PollInterval != "60s" {
+			t.Fatalf("got %+v", r)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("edit made before the watcher started was not reported")
 	}
 }

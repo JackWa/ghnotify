@@ -63,9 +63,16 @@ func Default() *AppConfig {
 // If the file cannot be parsed or is invalid, it returns the default config
 // together with the error, so the app can still start and report the problem.
 func Load() (*AppConfig, error) {
+	cfg, _, err := LoadRaw()
+	return cfg, err
+}
+
+// LoadRaw is Load, and also returns the file content the config was built
+// from, so a Watch started later can tell whether the file changed since.
+func LoadRaw() (*AppConfig, []byte, error) {
 	path, err := GetFilePath()
 	if err != nil {
-		return Default(), err
+		return Default(), nil, err
 	}
 	slog.Debug("loading config", "path", path)
 	if _, err := os.Stat(path); os.IsNotExist(err) {
@@ -74,18 +81,19 @@ func Load() (*AppConfig, error) {
 		if saveErr := cfg.save(path); saveErr != nil {
 			slog.Warn("could not write default config", "err", saveErr)
 		}
-		return cfg, nil
+		raw, _ := os.ReadFile(path)
+		return cfg, raw, nil
 	}
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return Default(), err
+		return Default(), nil, err
 	}
 	res := Parse(data)
 	if res.Err != nil {
 		slog.Warn("could not load config file, using defaults", "err", res.Err)
-		return Default(), res.Err
+		return Default(), data, res.Err
 	}
-	return res.Config, nil
+	return res.Config, data, nil
 }
 
 // ParseResult is the outcome of parsing a config file.
