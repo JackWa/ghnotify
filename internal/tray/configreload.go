@@ -82,6 +82,7 @@ type configReloader struct {
 	status  *appStatus
 	builtAt int    // max_prs_per_section the menu was built with
 	refresh func() // re-poll so new filters and intervals apply now
+	recheck func() // re-render the lists and icon with the new notification prefs
 }
 
 // startupError reports a config file that could not be loaded at startup.
@@ -104,6 +105,7 @@ func (r *configReloader) handle(res config.ParseResult) {
 	r.status.set(nil, restart)
 	slog.Info("config reloaded", "changes", changes, "unknown", res.Unknown)
 
+	r.recheck()
 	if len(changes) > 0 {
 		r.refresh()
 	}
